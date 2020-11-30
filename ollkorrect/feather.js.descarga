@@ -1,0 +1,300 @@
+import {
+	Scene,
+	PerspectiveCamera,
+	TextureLoader,
+	MeshMatcapMaterial,
+	WebGLRenderer,
+	AnimationMixer,
+	Clock,
+	DefaultLoadingManager,
+	CameraHelper,
+	GridHelper,
+	Geometry,
+	Points,
+	PointsMaterial,
+	Texture,
+	Vector3
+} from '../lib/three/build/three.module.js';
+import {OrbitControls} from '../lib/three/examples/jsm/controls/OrbitControls.js';
+import {FBXLoader} from '../lib/three/examples/jsm/loaders/FBXLoader.js';
+
+function Feather() {
+	this.renderStarted = false;
+	this.build();
+}
+
+Feather.prototype.build = function () {
+	const that = this;
+	this.container = document.querySelector('.feather-container');
+	this.scene = new Scene();
+	this.camera = new PerspectiveCamera(53, window.innerWidth / window.innerHeight, 0.1, 5000);
+	this.camera.position.set(0, 1, 90);
+	this.camera.lookAt(0, 1, 0);
+	this.scene.add(this.camera);
+
+	// Chargement du modèle 3D et des textures en fonction de la page
+	let folder = 'feather-1';
+	if (document.querySelector('.post-type-archive-collaborators')) {
+		folder = 'feather-2';
+	} else if (document.querySelector('.page-template-template-agency')) {
+		folder = 'feather-3';
+	} else if (document.querySelector('.post-type-archive-projects')) {
+		folder = 'feather-4';
+	} else if (document.querySelector('.error404')) {
+		folder = 'feather-404';
+	}
+
+	// Textures
+	this.textureLoader = new TextureLoader();
+	this.matcapFeatherTexture = this.textureLoader.load('/wp-content/themes/mcube/models/' + folder + '/matcap-feather.jpg');
+	this.matcapStemTexture = this.textureLoader.load('/wp-content/themes/mcube/models/' + folder + '/matcap-stem.jpg');
+	this.normalmap = this.textureLoader.load('/wp-content/themes/mcube/models/' + folder + '/normal-map.png');
+
+	// Gestion de la lumière de la plume
+	if(folder === 'feather-404'){
+		this.matcapFeather = new MeshMatcapMaterial({
+			matcap: this.matcapFeatherTexture
+		});
+	}
+	else{
+		this.matcapFeather = new MeshMatcapMaterial({
+			matcap: this.matcapFeatherTexture,
+			normalMap: this.normalmap
+		});
+	}
+	// Gestion de la lumière de la tige
+	this.matcapStem = new MeshMatcapMaterial({
+		matcap: this.matcapStemTexture,
+	});
+
+	const particleMultiplier = window.innerWidth > 1200 ? 1.4 : 1;
+
+	// Particules
+	this.defineParticlesContainer();
+	this.particleSystems = [];
+	this.addParticles(25 * particleMultiplier, 5, 0.5, 'particle-small.png');
+	this.addParticles(25 * particleMultiplier, 55, 0.4, 'particle-medium.png');
+	this.addParticles(15 * particleMultiplier, 36, 0.3, 'particle-big.png');
+
+	// Paramétrage scene
+	this.renderer = new WebGLRenderer({antialias: true, alpha: true});
+	this.renderer.setPixelRatio(window.devicePixelRatio);
+	this.renderer.setSize(window.innerWidth, window.innerHeight);
+	this.container.appendChild(this.renderer.domElement);
+
+	// Chargement du modèle 3D au format FBX
+	this.loader = new FBXLoader();
+	this.loader.load('/wp-content/themes/mcube/models/' + folder + '/feather-anim.fbx', function (object) {
+		that.model = object;
+		that.model.position.x = -15;
+		that.model.position.y = 10;
+		that.model.position.z = 50;
+		that.model.children[0].material = that.matcapStem;
+		that.model.children[0].children[0].material = that.matcapFeather;
+		that.mixer = new AnimationMixer(that.model);
+		that.clock = new Clock();
+		that.scene.add(that.model);
+		that.loaded();
+	});
+
+	const progressInner = document.querySelector('.progress-inner');
+	const progressText = document.querySelector('.progress-text-inner');
+	DefaultLoadingManager.onProgress = function (url, itemsLoaded, itemsTotal) {
+		let percentage = (itemsLoaded / itemsTotal) * 100;
+		progressInner.style.width = percentage + '%';
+		if (percentage === 100) {
+			progressText.innerHTML = '100.00000';
+		} else {
+			percentage = Math.round(percentage);
+			if (percentage < 10) {
+				percentage = '00' + percentage;
+			} else {
+				percentage = '0' + percentage;
+			}
+			progressText.innerHTML = percentage + '.' + percentage * 1234;
+		}
+
+		if (percentage === 100) {
+			setTimeout(function () {
+				document.dispatchEvent(new CustomEvent("load3DFinished"));
+			}, 1000);
+		}
+	};
+};
+
+Feather.prototype.loaded = function () {
+	this.model1loaded = true;
+	const that = this;
+	if (!this.renderStarted) {
+		this.renderStarted = true;
+		requestAnimationFrame(function (now) {
+			that.render();
+		});
+	}
+};
+
+Feather.prototype.startRender = function () {
+	if (this.model1loaded) {
+		for (const anim of this.model.animations) {
+			this.mixer.clipAction(anim).play();
+			this.mixer.setTime(15);
+		}
+	} else {
+		const that = this;
+		setTimeout(function () {
+			that.startRender();
+		}, 50);
+	}
+};
+
+Feather.prototype.defineParticlesContainer = function () {
+	this.maxX = window.innerWidth / 1.15 / 2;
+	this.minX = ~this.maxX + 1;
+	this.maxY = window.innerHeight / 1.15 / 2;
+	this.minY = -document.querySelector('.content-wrapper').clientHeight + this.maxY;
+};
+
+Feather.prototype.createCanvasMaterial = function (color, size) {
+	const matCanvas = document.createElement('canvas');
+	matCanvas.width = matCanvas.height = size;
+	const matContext = matCanvas.getContext('2d');
+	const texture = new Texture(matCanvas);
+	const center = size / 2;
+	matContext.beginPath();
+	matContext.arc(center, center, size / 2, 0, 2 * Math.PI, false);
+	matContext.closePath();
+	matContext.fillStyle = color;
+	matContext.fill();
+	texture.needsUpdate = true;
+	return texture;
+}
+
+Feather.prototype.addParticles = function (count, size, speed, imageMap) {
+	const particles = new Geometry();
+	const textureLoader = new TextureLoader();
+	const pMaterial = new PointsMaterial({
+		size: size,
+		sizeAttenuation: false,
+		color: '#efefef',
+		map: this.createCanvasMaterial('#efefef', 256),
+		alphaMap: textureLoader.load('/wp-content/themes/mcube/images/particles/' + imageMap),
+		transparent: true,
+		depthWrite: false
+	});
+	for (let p = 0; p < count; p++) {
+		const pX = Math.floor(Math.random() * (this.maxX - this.minX + 1)) + this.minX;
+		const pY = Math.floor(Math.random() * (this.maxY - this.minY + 1)) + this.minY;
+		const pZ = -500;
+		const particle = new Vector3(pX, pY, pZ);
+		particle.realY = pY;
+		particle.customA = 0;
+		particle.customS = speed + Math.random() * 0.2;
+		particle.ltr = Math.random() > 0.5;
+		particle.ttb = Math.random() > 0.5;
+		particles.vertices.push(particle);
+	}
+	const particleSystem = new Points(particles, pMaterial);
+	particleSystem.sortParticles = true;
+	this.scene.add(particleSystem);
+	this.particleSystems.push(particleSystem);
+	return particleSystem;
+};
+
+Feather.prototype.render = function () {
+	// Anim plume
+	this.delta = this.clock.getDelta();
+	if (this.mixer) this.mixer.update(this.delta);
+	window.currentY = window.currentY ? window.currentY : 0;
+
+	// Anim particules
+	for (const particleSystem of this.particleSystems) {
+		particleSystem.geometry.verticesNeedUpdate = true;
+		for (const particle of particleSystem.geometry.vertices) {
+			let newX;
+			let newY;
+			if (particle.ltr) {
+				newX = particle.x + Math.cos(particle.customA) * particle.customS;
+			} else {
+				newX = particle.x - Math.cos(particle.customA) * particle.customS;
+			}
+			if (particle.ttb) {
+				newY = particle.realY + Math.sin(particle.customA) * particle.customS;
+			} else {
+				newY = particle.realY - Math.sin(particle.customA) * particle.customS;
+			}
+			if (newX > this.minX && newX < this.maxX) {
+				particle.x = newX;
+			} else {
+				particle.ltr = !particle.ltr;
+			}
+			if (newY > this.minY && newY < this.maxY) {
+				particle.y = newY + window.currentY / 2;
+				particle.realY = newY;
+			} else {
+				particle.ttb = !particle.ttb;
+			}
+			particle.customA += Math.random() * 0.2 - 0.1;
+		}
+	}
+
+	// Render three js
+	this.renderer.render(this.scene, this.camera);
+	const that = this;
+	requestAnimationFrame(function (now) {
+		that.render();
+	});
+};
+
+Feather.prototype.debug = function () {
+	this.scene.add(new CameraHelper(this.camera));
+	const grid = new GridHelper(2000, 20, 0x000000, 0x000000);
+	grid.material.opacity = 0.2;
+	grid.material.transparent = true;
+	this.scene.add(grid);
+	const controls = new OrbitControls(this.camera, this.renderer.domElement);
+	controls.target.set(0, 0, 0);
+	controls.update();
+	$('.feather-container').css('pointer-events', 'all');
+	$('.content-wrapper').hide();
+	$('.hud').hide();
+};
+
+Feather.prototype.resize = function () {
+	this.camera.aspect = window.innerWidth / window.innerHeight;
+	this.camera.updateProjectionMatrix();
+	this.renderer.domElement.width = window.innerWidth;
+	this.renderer.domElement.height = window.innerHeight;
+	this.renderer.setSize(window.innerWidth, window.innerHeight);
+};
+
+Feather.prototype.destroy = function () {
+	this.animStarted = false;
+	this.model.position.y = 10;
+	this.model1loaded = false;
+	this.particleSystems.forEach(function (system) {
+		system.geometry.dispose();
+	});
+	this.matcapStem.dispose();
+	this.matcapStemTexture.dispose();
+	this.matcapFeather.dispose();
+	this.matcapFeatherTexture.dispose();
+	this.normalmap.dispose();
+	this.camera = null;
+	this.scene.dispose();
+	this.scene.remove(this.model);
+}
+
+Feather.prototype.onScroll = function (currentY) {
+	if (this.animStarted) {
+		var scrollDiff = (currentY - this.lastScrollTop);
+		this.lastScrollTop = currentY;
+		if (this.model) {
+			TweenMax.to(this.model.position, 3, {
+				y: scrollDiff / 3 - 18.3,
+				ease: Power4.easeOut
+			});
+		}
+	}
+};
+
+window.feather = new Feather();
